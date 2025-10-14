@@ -35,7 +35,6 @@ def main():
     
     parser = argparse.ArgumentParser(description="Instagram Bio Collector with VPN")
     parser.add_argument("vpn_service", choices=["protonvpn", "nordvpn"], help="VPN service to use")
-    parser.add_argument("namespace", default="", help="Network namespace to use for the VPN connection")
     args = parser.parse_args()
 
     vpn_dir = f"vpn_files/{args.vpn_service}"
@@ -52,7 +51,7 @@ def main():
         database = client[config["MONGO_DB"]]
         collection = database[config["MONGO_COLLECTION"]]
 
-        vpn = VpnHandler(vpn_dir, credentials_file, log, args.namespace)
+        vpn = VpnHandler(vpn_dir, credentials_file, log)
         vpn.load_server_list()
         request_count = 0
         vpn_connected = False

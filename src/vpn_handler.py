@@ -10,13 +10,12 @@ from itertools import cycle
 
 
 class VpnHandler:
-    def __init__(self, config_directory: str, credentials_file: str, log: logging.Logger, namespace: str = ""):
+    def __init__(self, config_directory: str, credentials_file: str, log: logging.Logger):
         """
-        Initialize the VPN handler with network namespace support.
+        Initialize the VPN handler wit support.
         :param config_directory: Directory containing .ovpn configuration files.
         :param credentials_file: Path to the file containing OpenVPN credentials.
         :param log: Logger instance for logging messages.
-        :param namespace: Network namespace name for VPN isolation (must be already configured).
         """
         self.config_directory = config_directory
         self.credentials_file = credentials_file
@@ -24,7 +23,6 @@ class VpnHandler:
         self.connected_server = None
         self.remotes_cycle = None
         self.log = log
-        self.namespace = namespace
         self.tmpfile_path = None
 
         # Validate credentials file
@@ -68,7 +66,7 @@ class VpnHandler:
 
     def _connect_to_server(self, config_file: str, host: str, port: str) -> bool:
         """
-        Connect to a specific VPN server using network namespace.
+        Connect to a specific VPN server.
         :return: True if connection was successful, False otherwise.
         """
         if not os.path.exists(config_file):
@@ -91,37 +89,20 @@ class VpnHandler:
                         continue
                     elif line.strip().startswith("auth-user-pass"):
                         tmpfile.write(f'auth-user-pass "{self.credentials_file}"\n')
-                    elif line.strip().startswith("up ") or line.strip().startswith("down "):
-                        # Skip DNS update scripts that don't work properly in namespaces
-                        self.log.debug(f"Skipping DNS script: {line.strip()}")
-                        continue
                     else:
                         tmpfile.write(line)
                 tmpfile.write(f"remote {host} {port}\n")
-                # Add namespace-compatible DNS settings
-                tmpfile.write("script-security 2\n")
-                tmpfile.write("up /bin/true\n")  # Use dummy script that always succeeds
-                tmpfile.write("down /bin/true\n")  # Use dummy script that always succeeds
                 self.tmpfile_path = tmpfile.name
 
-            self.log.info(f"Conectando ao servidor VPN: {host}:{port} no namespace '{self.namespace}'")
+            self.log.info(f"Conectando ao servidor VPN: {host}:{port}")
             
-            if self.namespace:
-                self.connected_process = subprocess.Popen(
-                    ["sudo", "ip", "netns", "exec", self.namespace, "openvpn", "--config", self.tmpfile_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    preexec_fn=os.setsid  # Create a new process group
-                )
-            else:
-                self.connected_process = subprocess.Popen(
-                    ["sudo", "openvpn", "--config", self.tmpfile_path],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    preexec_fn=os.setsid
-                )
+            self.connected_process = subprocess.Popen(
+                ["sudo", "openvpn", "--config", self.tmpfile_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                preexec_fn=os.setsid
+            )
 
             # Wait for connection confirmation with timeout
             start_time = time.time()
