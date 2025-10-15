@@ -227,15 +227,12 @@ def main():
                 data = {
                     "username": profile_data.username,
                     "full_name": profile_data.full_name,
+                    "profile_url": f"https://www.instagram.com/{profile_data.username}/",
+                    "userid": profile_data.userid,
                     "biography": profile_data.biography,
                     "external_url": profile_data.external_url,
                     "followers": profile_data.followers,
-                    "followees": profile_data.followees,
-                    "mediacount": profile_data.mediacount,
-                    "is_verified": profile_data.is_verified,
-                    "is_private": profile_data.is_private,
-                    "is_business_account": profile_data.is_business_account,
-                    "profile_pic_url": profile_data.profile_pic_url
+                    "following": profile_data.followees,
                 }
 
                 # Enviar dados para API
