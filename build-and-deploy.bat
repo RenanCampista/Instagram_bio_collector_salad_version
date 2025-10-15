@@ -2,7 +2,7 @@
 REM Script para Windows para construir e fazer deploy da aplicação no SaladCloud
 
 REM Configurações - MODIFIQUE ESTAS VARIÁVEIS
-set DOCKER_USERNAME=seu-usuario
+set DOCKER_USERNAME=renan2002
 set IMAGE_NAME=instagram-bio-collector
 set VERSION=latest
 set FULL_IMAGE_NAME=%DOCKER_USERNAME%/%IMAGE_NAME%:%VERSION%

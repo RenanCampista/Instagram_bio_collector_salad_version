@@ -20,7 +20,7 @@ iptables -P FORWARD ACCEPT 2>/dev/null || echo "Não foi possível configurar ip
 
 # Verificar variáveis de ambiente obrigatórias
 echo "Verificando variáveis de ambiente..."
-required_vars=("MONGO_CONNECTION_STRING" "MONGO_DB" "MONGO_COLLECTION" "API_ROUTE" "SECRET_TOKEN")
+required_vars=("MONGO_CONNECTION_STRING" "MONGO_DB" "MONGO_COLLECTION" "API_ROUTE" "SECRET_TOKEN" "VPN_USERNAME" "VPN_PASSWORD")
 missing_vars=()
 
 for var in "${required_vars[@]}"; do
@@ -39,18 +39,14 @@ if [ ${#missing_vars[@]} -ne 0 ]; then
     echo "   MONGO_COLLECTION: Nome da coleção"
     echo "   API_ROUTE: URL da API para enviar dados"
     echo "   SECRET_TOKEN: Token de autenticação da API"
+    echo "   VPN_USERNAME: Usuário da VPN"
+    echo "   VPN_PASSWORD: Senha da VPN"
     exit 1
 fi
 
 # Configurar serviço VPN baseado na variável de ambiente
 VPN_SERVICE=${VPN_SERVICE:-nordvpn}
 echo "Usando serviço VPN: $VPN_SERVICE"
-
-# Verificar se arquivos de credenciais existem
-if [ ! -f "${VPN_SERVICE}_credentials.txt" ]; then
-    echo "ERRO: Arquivo de credenciais não encontrado: ${VPN_SERVICE}_credentials.txt"
-    exit 1
-fi
 
 # Verificar se diretório VPN existe
 if [ ! -d "vpn_files/$VPN_SERVICE" ]; then

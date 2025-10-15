@@ -5,7 +5,7 @@
 set -e
 
 # Configurações - MODIFIQUE ESTAS VARIÁVEIS
-DOCKER_USERNAME="seu-usuario"  # Seu usuário do Docker Hub
+DOCKER_USERNAME="renan2002"  # Seu usuário do Docker Hub
 IMAGE_NAME="instagram-bio-collector"
 VERSION="latest"
 FULL_IMAGE_NAME="${DOCKER_USERNAME}/${IMAGE_NAME}:${VERSION}"

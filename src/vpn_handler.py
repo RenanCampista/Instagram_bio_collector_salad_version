@@ -24,10 +24,28 @@ class VpnHandler:
         self.remotes_cycle = None
         self.log = log
         self.tmpfile_path = None
+        self.credentials_tmp_path = None
 
-        # Validate credentials file
-        if not os.path.exists(self.credentials_file):
-            raise FileNotFoundError(f"Arquivo de credenciais não encontrado: {self.credentials_file}")
+        # Try to get credentials from environment variables first
+        self.vpn_username = os.getenv('VPN_USERNAME')
+        self.vpn_password = os.getenv('VPN_PASSWORD')
+        
+        # If not in environment, try to read from file
+        if not self.vpn_username or not self.vpn_password:
+            if os.path.exists(self.credentials_file):
+                self._load_credentials_from_file()
+            else:
+                raise FileNotFoundError(f"Credenciais VPN não encontradas em variáveis de ambiente nem no arquivo: {self.credentials_file}")
+    
+    def _load_credentials_from_file(self):
+        """Load VPN credentials from file."""
+        try:
+            with open(self.credentials_file, 'r', encoding='utf-8') as f:
+                lines = f.read().strip().split('\n')
+                self.vpn_username = lines[0].strip()
+                self.vpn_password = lines[1].strip()
+        except Exception as e:
+            raise Exception(f"Erro ao ler credenciais do arquivo {self.credentials_file}: {e}")
 
     def load_server_list(self):
         """
@@ -82,17 +100,23 @@ class VpnHandler:
             with open(config_file, 'r') as file:
                 config_data = file.readlines()
 
+            # Create temporary credentials file
+            with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt') as cred_file:
+                cred_file.write(f"{self.vpn_username}\n{self.vpn_password}\n")
+                credentials_path = cred_file.name
+            
             # Create temporary config file with specific remote and credentials
             with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.ovpn') as tmpfile:
                 for line in config_data:
                     if line.strip().startswith("remote "):
                         continue
                     elif line.strip().startswith("auth-user-pass"):
-                        tmpfile.write(f'auth-user-pass "{self.credentials_file}"\n')
+                        tmpfile.write(f'auth-user-pass "{credentials_path}"\n')
                     else:
                         tmpfile.write(line)
                 tmpfile.write(f"remote {host} {port}\n")
                 self.tmpfile_path = tmpfile.name
+                self.credentials_tmp_path = credentials_path
 
             self.log.info(f"Conectando ao servidor VPN: {host}:{port}")
             
@@ -202,5 +226,13 @@ class VpnHandler:
                     except Exception as e:
                         self.log.warning(f"Não foi possível remover o arquivo temporário: {e}")
                     self.tmpfile_path = None
+                
+                # Clean up temporary credentials file
+                if hasattr(self, 'credentials_tmp_path') and self.credentials_tmp_path and os.path.exists(self.credentials_tmp_path):
+                    try:
+                        os.remove(self.credentials_tmp_path)
+                    except Exception as e:
+                        self.log.warning(f"Não foi possível remover o arquivo de credenciais temporário: {e}")
+                    self.credentials_tmp_path = None
         else:
             self.log.warning("Nenhuma conexão VPN ativa para desconectar.")
