@@ -35,13 +35,13 @@ def load_env_variables():
     return config
 
 
-def get_profiles_from_db_distributed(collection, instance_id, instance_count, log, limit=100):
+def get_profiles_from_db_distributed(collection, instance_id, instance_count, hostname, log, limit=100):
     """
-    Obtém perfis do MongoDB com distribuição entre instâncias.
+    Obtém perfis do MongoDB com distribuição entre instâncias e marca como 'processing'.
     """
     try:
-        # Query básica para perfis pendentes
-        base_query = {"status": "pending"}
+        # Query básica para perfis não coletados
+        base_query = {"status": "not_collected"}
         
         # Se múltiplas instâncias, usar distribuição
         if instance_count > 1:
@@ -51,14 +51,49 @@ def get_profiles_from_db_distributed(collection, instance_id, instance_count, lo
         else:
             profiles_cursor = collection.find(base_query).limit(limit)
         
-        profiles = [profile["username"] for profile in profiles_cursor]
+        # Converter cursor para lista
+        profiles_docs = list(profiles_cursor)
         
-        if profiles:
-            log.info(f"Obtidos {len(profiles)} perfis para processar (Instância {instance_id})")
+        if not profiles_docs:
+            log.info("Nenhum perfil não coletado encontrado para esta instância")
+            return []
+        
+        # Extrair usernames e _ids para o update
+        usernames = []
+        profile_ids = []
+        
+        for doc in profiles_docs:
+            if "username" in doc:
+                usernames.append(doc["username"])
+                profile_ids.append(doc["_id"])
+        
+        # Atualizar status para 'processing' em lote usando findAndModify atômico
+        # Isso garante que apenas uma instância pegue cada perfil
+        final_usernames = []
+        
+        for username, profile_id in zip(usernames, profile_ids):
+            result = collection.find_one_and_update(
+                {"_id": profile_id, "status": "not_collected"},  # Só atualiza se ainda for 'not_collected'
+                {
+                    "$set": {
+                        "status": "processing",
+                        "processing_by": hostname,
+                        "instance_id": instance_id
+                    },
+                    "$currentDate": {"processing_started_at": True}
+                },
+                return_document=True
+            )
+            
+            if result:  # Se conseguiu fazer o update (não foi pego por outra instância)
+                final_usernames.append(username)
+        
+        if final_usernames:
+            log.info(f"Reservados {len(final_usernames)} perfis para processamento (Instância {instance_id})")
         else:
-            log.info("Nenhum perfil pendente encontrado para esta instância")
+            log.info("Nenhum perfil disponível - todos já sendo processados por outras instâncias")
         
-        return profiles
+        return final_usernames
         
     except Exception as e:
         log.error(f"Erro ao obter perfis do MongoDB: {e}")
@@ -107,7 +142,7 @@ def main():
         while True:
             # Usar função distribuída para obter perfis
             profiles = get_profiles_from_db_distributed(
-                collection, instance_id, instance_count, log
+                collection, instance_id, instance_count, hostname, log
             )
             
             if not profiles:
@@ -119,11 +154,7 @@ def main():
                 vpn.connect_to_next_server()
                 vpn_connected = True
             
-            for profile in profiles:
-                # Verificar se esta instância deve processar este perfil
-                if not should_process_profile(profile, instance_id, instance_count):
-                    continue
-                
+            for profile in profiles:                
                 profiles_processed += 1
                 
                 # Sleep aleatório entre requisições

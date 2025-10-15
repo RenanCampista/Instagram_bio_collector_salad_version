@@ -93,7 +93,14 @@ def print_dashboard(stats, recent_activity, instance_stats):
     
     for status, count in stats.items():
         percentage = (count / total * 100) if total > 0 else 0
-        symbol = "[OK]" if status == "collected" else "[--]" if status == "pending" else "[ER]"
+        if status == "collected":
+            symbol = "[OK]"
+        elif status == "processing":
+            symbol = "[>>]"
+        elif status == "not_collected":
+            symbol = "[--]"
+        else:  # error
+            symbol = "[ER]"
         print(f"   {symbol} {status.title()}: {count:,} ({percentage:.1f}%)")
     
     print()
@@ -102,7 +109,7 @@ def print_dashboard(stats, recent_activity, instance_stats):
     if recent_activity > 0:
         rate_per_hour = recent_activity
         rate_per_minute = rate_per_hour / 60
-        estimated_completion = stats.get("pending", 0) / rate_per_hour if rate_per_hour > 0 else float('inf')
+        estimated_completion = stats.get("not_collected", 0) / rate_per_hour if rate_per_hour > 0 else float('inf')
         
         print(f"Taxa atual: {rate_per_minute:.1f} perfis/min")
         if estimated_completion != float('inf'):

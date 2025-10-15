@@ -67,11 +67,12 @@ VPN_SERVICE=nordvpn
 
 ### Distribuição de Carga
 
-Para otimizar a distribuição entre as 30 instâncias, considere modificar o código para:
+✅ **Já implementado** - A distribuição inteligente funciona automaticamente:
 
-1. **Usar ID único por instância** (já configurado via hostname)
-2. **Distribuir perfis** baseado no ID da instância
-3. **Evitar conflitos** entre instâncias
+1. **Status "processing"** - Perfis são marcados como "processing" quando selecionados
+2. **Updates atômicos** - Evita que múltiplas instâncias processem o mesmo perfil  
+3. **Rastreamento por instância** - Cada perfil registra qual instância o processou
+4. **Recuperação automática** - Perfis travados podem ser resetados com script utilitário
 
 ### Exemplo de Modificação no Código
 
