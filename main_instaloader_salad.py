@@ -185,7 +185,7 @@ def main():
                 
                 # Verificar se deve reiniciar por número de requisições
                 if request_count >= SALAD_CONFIG["max_requests_per_restart"]:
-                    log.info(f"🔄 Processadas {request_count} requisições - reiniciando para novo IP")
+                    log.info(f"Processadas {request_count} requisições - reiniciando para novo IP")
                     send_pending_updates(collection, pending_updates, log)
                     handle_rate_limit_restart()
                     

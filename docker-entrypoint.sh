@@ -5,7 +5,7 @@
 
 set -e
 
-echo "🚀 Iniciando Instagram Bio Collector no SaladCloud..."
+echo "Iniciando Instagram Bio Collector no SaladCloud..."
 
 # Verificar variáveis de ambiente obrigatórias
 echo "Verificando variáveis de ambiente..."
@@ -19,7 +19,7 @@ for var in "${required_vars[@]}"; do
 done
 
 if [ ${#missing_vars[@]} -ne 0 ]; then
-    echo "❌ ERRO: Variáveis de ambiente obrigatórias não definidas:"
+    echo "ERRO: Variáveis de ambiente obrigatórias não definidas:"
     printf '   - %s\n' "${missing_vars[@]}"
     echo ""
     echo "Configure estas variáveis no SaladCloud Portal:"
@@ -32,7 +32,7 @@ if [ ${#missing_vars[@]} -ne 0 ]; then
 fi
 
 # Log informações do sistema
-echo "📊 Informações do sistema:"
+echo "Informações do sistema:"
 echo "   - Hostname: $(hostname)"
 echo "   - IP atual: $(curl -s ifconfig.me || echo 'Não disponível')"
 
@@ -44,10 +44,10 @@ echo "   - Instance ID: $INSTANCE_ID"
 echo ""
 
 # Configurar política de restart para rotação de IP
-echo "🔄 Estratégia: Rotação automática de containers para novos IPs"
-echo "📡 Rate limits: Restart automático quando detectados"
+echo "Estratégia: Rotação automática de containers para novos IPs"
+echo "Rate limits: Restart automático quando detectados"
 echo ""
 
 # Executar aplicação principal
-echo "▶️ Iniciando coleta de perfis Instagram..."
+echo "Iniciando coleta de perfis Instagram..."
 exec "$@"

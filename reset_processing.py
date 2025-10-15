@@ -67,7 +67,7 @@ def reset_stuck_processing_profiles(minutes_stuck=30):
                 }
             )
             
-            print(f"✅ {result.modified_count} perfis foram resetados de 'processing' para 'not_collected'.")
+            print(f"Sucesso: {result.modified_count} perfis foram resetados de 'processing' para 'not_collected'.")
         else:
             print("Operação cancelada.")
             
@@ -114,7 +114,7 @@ def show_processing_stats():
             print("Nenhum perfil em 'processing' encontrado.")
             return
         
-        print("\n📊 PERFIS EM PROCESSING:")
+        print("\nPERFIS EM PROCESSING:")
         print("=" * 60)
         
         total_processing = 0
@@ -153,7 +153,7 @@ def show_processing_stats():
 def main():
     """Menu principal"""
     while True:
-        print("\n🔧 UTILITÁRIO DE RESET DE PERFIS")
+        print("\nUTILITÁRIO DE RESET DE PERFIS")
         print("=" * 40)
         print("1. Mostrar estatísticas de perfis em 'processing'")
         print("2. Resetar perfis travados (30+ minutos)")

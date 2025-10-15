@@ -51,12 +51,12 @@ logging:
 5. **Ciclo se repete** → IPs sempre diferentes, bypass natural
 
 ### Benefícios desta Abordagem:
-- ✅ **Simplicidade**: Sem VPN para configurar ou manter
-- ✅ **Confiabilidade**: Não depende de servidores VPN externos
-- ✅ **Escalabilidade**: Fácil aumentar réplicas para mais throughput
-- ✅ **IPs Únicos**: SaladCloud garante IPs diferentes por container
-- ✅ **Rate Limit Bypass**: Reinício automático transparente
-- ✅ **Custo-benefício**: Sem custos adicionais de VPN
+- **Simplicidade**: Sem VPN para configurar ou manter
+- **Confiabilidade**: Não depende de servidores VPN externos
+- **Escalabilidade**: Fácil aumentar réplicas para mais throughput
+- **IPs Únicos**: SaladCloud garante IPs diferentes por container
+- **Rate Limit Bypass**: Reinício automático transparente
+- **Custo-benefício**: Sem custos adicionais de VPN
 
 ### Performance Esperada:
 - **30 containers** × **120 perfis/ciclo** = **3.600 perfis/ciclo**
@@ -105,4 +105,4 @@ docker run \
 
 ---
 
-**Esta estratégia utiliza a infraestrutura do SaladCloud de forma nativa e eficiente para bypass de rate limits!** 🚀
+**Esta estratégia utiliza a infraestrutura do SaladCloud de forma nativa e eficiente para bypass de rate limits.**
