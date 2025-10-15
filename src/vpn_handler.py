@@ -120,8 +120,9 @@ class VpnHandler:
 
             self.log.info(f"Conectando ao servidor VPN: {host}:{port}")
             
+            # No container Docker, não precisamos de sudo pois já rodamos como root
             self.connected_process = subprocess.Popen(
-                ["sudo", "openvpn", "--config", self.tmpfile_path],
+                ["openvpn", "--config", self.tmpfile_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -204,16 +205,31 @@ class VpnHandler:
             try:
                 self.log.info(f"Desconectando do servidor VPN: {self.connected_server}")
                 
-                # Terminate the process group
+                # Terminate the process group (with fallback for containers)
                 try:
-                    os.killpg(os.getpgid(self.connected_process.pid), signal.SIGTERM)
+                    # Tentar killpg primeiro (funciona na maioria dos casos)
+                    try:
+                        os.killpg(os.getpgid(self.connected_process.pid), signal.SIGTERM)
+                    except (OSError, ProcessLookupError):
+                        # Fallback: matar apenas o processo principal
+                        self.connected_process.terminate()
+                    
                     self.connected_process.wait(timeout=10)
                     self.log.info("VPN terminada com sucesso.")
                 except subprocess.TimeoutExpired:
                     self.log.warning("VPN não terminou gracefully, forçando encerramento...")
-                    os.killpg(os.getpgid(self.connected_process.pid), signal.SIGKILL)
+                    try:
+                        os.killpg(os.getpgid(self.connected_process.pid), signal.SIGKILL)
+                    except (OSError, ProcessLookupError):
+                        # Fallback: kill direto do processo
+                        self.connected_process.kill()
                 except Exception as e:
                     self.log.error(f"Erro ao terminar processo VPN: {e}")
+                    # Último recurso: kill direto
+                    try:
+                        self.connected_process.kill()
+                    except:
+                        pass
             except Exception as e:
                 self.log.error(f"Erro ao desconectar VPN: {e}")
             finally:
