@@ -65,9 +65,9 @@ def get_distributed_profiles_query(instance_id, instance_count):
 
 # Configurações específicas do SaladCloud
 SALAD_CONFIG = {
-    "max_requests_per_vpn_change": 120,
-    "sleep_range": (2, 5),  # segundos entre requisições
-    "vpn_change_delay": 5,  # segundos após trocar VPN
-    "batch_size": 50,       # tamanho do batch para MongoDB
-    "health_check_interval": 300,  # 5 minutos
+    "max_requests_per_restart": 120,  # requisições antes de reiniciar para novo IP
+    "sleep_range": (2, 5),            # segundos entre requisições  
+    "restart_delay": 5,               # segundos antes de reiniciar
+    "batch_size": 50,                 # tamanho do batch para MongoDB
+    "health_check_interval": 300,     # 5 minutos
 }

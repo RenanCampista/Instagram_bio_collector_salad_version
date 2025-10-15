@@ -2,18 +2,17 @@ import logging
 import time
 import random
 import os
-import argparse
+import sys
+import signal
 
 from instaloader import Instaloader, Profile
 from dotenv import load_dotenv
 from pymongo import UpdateOne
 
-from src.utils import connect_to_mongodb, get_profiles_from_db, setup_logging, send_pending_updates
+from src.utils import connect_to_mongodb, setup_logging, send_pending_updates
 from src.api_db_client import ApiDbClient
-from src.vpn_handler import VpnHandler
 from src.salad_utils import (
     get_instance_info, 
-    should_process_profile, 
     log_instance_info,
     SALAD_CONFIG
 )
@@ -100,23 +99,51 @@ def get_profiles_from_db_distributed(collection, instance_id, instance_count, ho
         return []
 
 
+def handle_rate_limit_restart():
+    """
+    Reinicia o container quando atinge rate limits.
+    Isso força o SaladCloud a criar nova instância com novo IP.
+    """
+    log.info("Rate limit atingido - reiniciando container para novo IP")
+    log.info("SaladCloud criará nova instância automaticamente")
+    
+    # Exit code 2 = restart container
+    sys.exit(2)
+
+
+def check_rate_limit_in_error(error_message):
+    """
+    Verifica se o erro é relacionado a rate limit.
+    """
+    rate_limit_indicators = [
+        "Please wait a few minutes before you try again",
+        "429",
+        "Too Many Requests", 
+        "rate limit",
+        "Temporary failure in name resolution"
+    ]
+    
+    return any(indicator in str(error_message) for indicator in rate_limit_indicators)
+
+
 def main():
-    """Main function to collect Instagram profile data and send it to an API."""
+    """Main function to collect Instagram profile data without VPN."""
     config = load_env_variables()
     
     # Obter informações da instância para distribuição de trabalho
     instance_id, instance_count, hostname = get_instance_info()
     
-    parser = argparse.ArgumentParser(description="Instagram Bio Collector with VPN")
-    parser.add_argument("vpn_service", choices=["protonvpn", "nordvpn"], help="VPN service to use")
-    args = parser.parse_args()
-
-    vpn_dir = f"vpn_files/{args.vpn_service}"
-    credentials_file = f"{args.vpn_service}_credentials.txt"
-    
     # Log informações da instância
     log_instance_info(log, instance_id, instance_count, hostname)
     
+    # Mostrar IP atual (sem VPN)
+    try:
+        import requests
+        current_ip = requests.get("https://api.ipify.org", timeout=5).text
+        log.info(f"IP atual da instância: {current_ip}")
+    except:
+        log.info("IP atual: Não foi possível determinar")
+
     L = Instaloader()
     L.context.sleep = True # Enable built-in sleep to handle rate limits
     
@@ -127,10 +154,7 @@ def main():
         database = client[config["MONGO_DB"]]
         collection = database[config["MONGO_COLLECTION"]]
 
-        vpn = VpnHandler(vpn_dir, credentials_file, log)
-        vpn.load_server_list()
         request_count = 0
-        vpn_connected = False
         
         # Lista para acumular atualizações em batch
         pending_updates = []
@@ -138,6 +162,9 @@ def main():
         # Contador para estatísticas
         profiles_processed = 0
         profiles_success = 0
+        
+        # Contador de erros de rate limit consecutivos
+        consecutive_rate_limit_errors = 0
         
         while True:
             # Usar função distribuída para obter perfis
@@ -149,11 +176,6 @@ def main():
                 log.info("Não há mais perfis para processar. Encerrando o script.")
                 break
             
-            # Conectar VPN apenas antes de começar a coletar perfis do Instagram
-            if not vpn_connected:
-                vpn.connect_to_next_server()
-                vpn_connected = True
-            
             for profile in profiles:                
                 profiles_processed += 1
                 
@@ -161,29 +183,34 @@ def main():
                 sleep_time = random.uniform(*SALAD_CONFIG["sleep_range"])
                 time.sleep(sleep_time)
                 
-                if request_count >= SALAD_CONFIG["max_requests_per_vpn_change"]:
-                    log.info(f"Atingidas {request_count} requisições. Trocando servidor VPN...")
-                    vpn.disconnect()
-                    vpn_connected = False
-                    
-                    log.info(f"Aguardando {SALAD_CONFIG['vpn_change_delay']} segundos antes de reconectar...")
-                    time.sleep(SALAD_CONFIG["vpn_change_delay"])
-                    
+                # Verificar se deve reiniciar por número de requisições
+                if request_count >= SALAD_CONFIG["max_requests_per_restart"]:
+                    log.info(f"🔄 Processadas {request_count} requisições - reiniciando para novo IP")
                     send_pending_updates(collection, pending_updates, log)
-
-                    vpn.connect_to_next_server()
-                    vpn_connected = True
-                    request_count = 0
+                    handle_rate_limit_restart()
                     
                 try:
                     log.info(f"Coletando dados do perfil: {profile} (Instância {instance_id})")
                     profile_data = Profile.from_username(L.context, profile.strip())
                     request_count += 1
+                    consecutive_rate_limit_errors = 0  # Reset contador de erros
                 except Exception as e:
                     log.error(f"Erro ao coletar dados do perfil {profile}: {e}")
+                    
+                    # Verificar se é erro de rate limit
+                    if check_rate_limit_in_error(str(e)):
+                        consecutive_rate_limit_errors += 1
+                        log.warning(f"Rate limit detectado (erro #{consecutive_rate_limit_errors})")
+                        
+                        # Após 3 erros consecutivos de rate limit, reiniciar
+                        if consecutive_rate_limit_errors >= 3:
+                            log.info("Múltiplos rate limits detectados - reiniciando container")
+                            send_pending_updates(collection, pending_updates, log)
+                            handle_rate_limit_restart()
+                        
+                        request_count += 10  # Penalidade para rate limit
+                    
                     # Adicionar atualização ao batch
-                    if "Please wait a few minutes before you try again." in str(e):
-                        request_count += 50  # Penalidade maior para erros de rate limit
                     pending_updates.append(
                         UpdateOne(
                             {"username": profile},
@@ -200,19 +227,24 @@ def main():
                 data = {
                     "username": profile_data.username,
                     "full_name": profile_data.full_name,
-                    "profile_url": f"https://www.instagram.com/{profile_data.username}/",
-                    "userid": profile_data.userid,
                     "biography": profile_data.biography,
                     "external_url": profile_data.external_url,
                     "followers": profile_data.followers,
-                    "following": profile_data.followees,
-                    "processed_by": hostname,  # Adicionar info da instância
-                    "instance_id": instance_id
+                    "followees": profile_data.followees,
+                    "mediacount": profile_data.mediacount,
+                    "is_verified": profile_data.is_verified,
+                    "is_private": profile_data.is_private,
+                    "is_business_account": profile_data.is_business_account,
+                    "profile_pic_url": profile_data.profile_pic_url
                 }
+
+                # Enviar dados para API
+                success = api_client.send_json(data)
                 
-                if api_client.send_json(data):
-                    log.info(f"Dados enviados com sucesso para o perfil: {profile}.")
+                if success:
                     profiles_success += 1
+                    log.info(f"Dados enviados com sucesso para o perfil: {profile}.")
+                    
                     # Adicionar atualização ao batch
                     pending_updates.append(
                         UpdateOne(
@@ -224,8 +256,7 @@ def main():
                         )
                     )
                 else:
-                    log.error(f"Falha ao enviar dados para o perfil: {profile}.")
-                    # Adicionar atualização ao batch
+                    log.error(f"Falha ao enviar dados para o perfil: {profile}")
                     pending_updates.append(
                         UpdateOne(
                             {"username": profile},
@@ -235,47 +266,35 @@ def main():
                             }
                         )
                     )
-                
-                # Enviar batch se atingir o limite
-                if len(pending_updates) >= SALAD_CONFIG["batch_size"]:
+
+                # Enviar updates em lotes de 10
+                if len(pending_updates) >= 10:
                     send_pending_updates(collection, pending_updates, log)
-                
-                # Log de progresso a cada 10 perfis
-                if profiles_processed % 10 == 0:
-                    success_rate = (profiles_success / profiles_processed) * 100 if profiles_processed > 0 else 0
-                    log.info(f"Progresso: {profiles_processed} processados, {profiles_success} sucessos ({success_rate:.1f}%)")
-                    
-    except Exception as e:
-        log.error(f"Erro geral no script: {e}")
-    finally:
+
+        # Enviar updates finais
+        if pending_updates:
+            send_pending_updates(collection, pending_updates, log)
+
+    except KeyboardInterrupt:
         log.info("Encerrando script...")
-        
+    except Exception as e:
+        log.error(f"Erro crítico: {e}")
+        sys.exit(1)
+    finally:
         # Estatísticas finais
+        log.info(f"Estatísticas Finais (Instância {instance_id}):")
+        log.info(f"   - Perfis Processados: {profiles_processed}")
+        log.info(f"   - Sucessos: {profiles_success}")
         if profiles_processed > 0:
             success_rate = (profiles_success / profiles_processed) * 100
-            log.info(f"Estatísticas Finais (Instância {instance_id}):")
-            log.info(f"   - Perfis Processados: {profiles_processed}")
-            log.info(f"   - Sucessos: {profiles_success}")
             log.info(f"   - Taxa de Sucesso: {success_rate:.1f}%")
         
-        try:
-            if vpn_connected:
-                vpn.disconnect()
-                log.info("VPN desconectada.")
-        except Exception as vpn_error:
-            log.error(f"Erro ao desconectar VPN: {vpn_error}")
-        
-        try:
+        # Enviar updates finais se houver
+        if pending_updates:
             send_pending_updates(collection, pending_updates, log)
-        except Exception as update_error:
-            log.error(f"Erro ao enviar atualizações finais: {update_error}")
+            
+        log.info("Conexão MongoDB fechada.")
 
-        try:
-            client.close()
-            log.info("Conexão MongoDB fechada.")
-        except Exception as db_error:
-            log.error(f"Erro ao fechar conexão MongoDB: {db_error}")
-            
-            
+
 if __name__ == "__main__":
     main()
