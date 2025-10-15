@@ -6,9 +6,6 @@ __pycache__/
 # C extensions
 *.so
 
-protonvpn_credentials.txt
-nordvpn_credentials.txt
-
 # Distribution / packaging
 .Python
 build/
