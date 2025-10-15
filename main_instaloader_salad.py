@@ -201,9 +201,9 @@ def main():
                     if check_rate_limit_in_error(str(e)):
                         consecutive_rate_limit_errors += 1
                         log.warning(f"Rate limit detectado (erro #{consecutive_rate_limit_errors})")
-                        
-                        # Após 3 erros consecutivos de rate limit, reiniciar
-                        if consecutive_rate_limit_errors >= 3:
+
+                        # Após 15 erros consecutivos de rate limit, reiniciar
+                        if consecutive_rate_limit_errors >= 15:
                             log.info("Múltiplos rate limits detectados - reiniciando container")
                             send_pending_updates(collection, pending_updates, log)
                             handle_rate_limit_restart()
