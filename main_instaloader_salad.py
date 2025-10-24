@@ -14,6 +14,7 @@ from src.utils import (
     connect_to_mongodb, 
     setup_logging, 
     send_pending_updates,
+    reset_stuck_processing_profiles,
     get_instance_info, 
     SALAD_CONFIG
 )
@@ -35,7 +36,7 @@ def load_env_variables():
     return config
 
 
-def get_profiles_from_db_distributed(collection, instance_id, instance_count, hostname, log, limit=100):
+def get_profiles_from_db_distributed(collection, instance_id, hostname, log, limit=100):
     """Obtém perfis do MongoDB com distribuição entre instâncias e marca como 'processing'."""
     try:
         # Query básica para perfis não coletados
@@ -135,12 +136,15 @@ def main():
         client = connect_to_mongodb(config["MONGO_CONNECTION_STRING"], log)
         database = client[config["MONGO_DB"]]
         collection = database[config["MONGO_COLLECTION"]]
+        
+        # Resetar perfis travados em 'processing' (de instâncias que crasharam/reiniciaram)
+        reset_stuck_processing_profiles(collection, log)
 
         request_count = 0
         pending_updates = []
         while True:
             profiles = get_profiles_from_db_distributed(
-                collection, instance_id, instance_count, hostname, log
+                collection, instance_id, hostname, log
             )
             
             if not profiles:
@@ -163,11 +167,9 @@ def main():
                     profile_data = Profile.from_username(L.context, profile.strip())
                     request_count += 1
                 except Exception as e:
-                    log.error(f"Erro ao coletar dados do perfil {profile}: {e}")
-                    
                     # Verificar se é erro de rate limit
                     if check_rate_limit_in_error(str(e)):
-                        log.warning(f"Rate limit detectado - adicionando penalidade ao contador")
+                        log.warning(f"Rate limit detectado ao coletar {profile}.")
                         request_count += 15  # Penalidade maior força reinício mais rápido
                     
                         pending_updates.append(
@@ -180,6 +182,7 @@ def main():
                             )
                         )
                     else:
+                        log.error(f"Erro ao coletar dados do perfil {profile}: {e}")
                         request_count += 10 # Penalidade menor para outros erros
                         pending_updates.append(
                             UpdateOne(

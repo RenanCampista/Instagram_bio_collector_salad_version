@@ -34,18 +34,6 @@ def setup_logging(log_dir: str, log_name: str) -> logging.Logger:
 def send_pending_updates(collection: Collection, pending_updates: list[UpdateOne], log: logging.Logger) -> bool:
     """Envia atualizações pendentes para o MongoDB."""
     try:
-        # Verificar e resetar perfis que ficaram com status "processing"
-        processing_count = collection.count_documents({"status": "processing"})
-        if processing_count > 0:
-            reset_result = collection.update_many(
-                {"status": "processing"},
-                {
-                    "$set": {"status": "not_collected"},
-                    "$unset": {"processing_by": "", "instance_id": "", "processing_started_at": ""},
-                    "$currentDate": {"updated_at": True}
-                }
-            )
-        
         # Enviar atualizações pendentes
         if pending_updates:
             log.info(f"Enviando {len(pending_updates)} atualizações para o MongoDB...")
@@ -57,8 +45,37 @@ def send_pending_updates(collection: Collection, pending_updates: list[UpdateOne
     except Exception as batch_error:
         log.error(f"Erro ao enviar batch de atualizações: {batch_error}")
         if pending_updates:
-            pending_updates.clear()  # Limpar para evitar reenvio
+            pending_updates.clear()  # Limpar para eviar reenvio
         return False
+
+
+def reset_stuck_processing_profiles(collection: Collection, log: logging.Logger) -> int:
+    """
+    Reseta perfis que ficaram travados com status 'processing'.
+    Deve ser chamado APENAS no início do script, antes de começar a processar.
+    """
+    try:
+        processing_count = collection.count_documents({"status": "processing"})
+        
+        if processing_count > 0:
+            log.info(f"Encontrados {processing_count} perfis travados em 'processing'. Resetando...")
+            result = collection.update_many(
+                {"status": "processing"},
+                {
+                    "$set": {"status": "not_collected"},
+                    "$unset": {"processing_by": "", "instance_id": "", "processing_started_at": ""},
+                    "$currentDate": {"updated_at": True}
+                }
+            )
+            log.info(f"Resetados {result.modified_count} perfis travados.")
+            return result.modified_count
+        else:
+            log.info("Nenhum perfil travado encontrado.")
+            return 0
+            
+    except Exception as e:
+        log.error(f"Erro ao resetar perfis travados: {e}")
+        return 0
 
 
 def connect_to_mongodb(connection_string: str, log: logging.Logger) -> MongoClient:
