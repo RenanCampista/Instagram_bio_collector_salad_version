@@ -3,7 +3,7 @@ import time
 import random
 import os
 import sys
-import signal
+import requests
 
 from instaloader import Instaloader, Profile
 from dotenv import load_dotenv
@@ -105,8 +105,7 @@ def handle_rate_limit_restart():
     Isso força o SaladCloud a criar nova instância com novo IP.
     """
     log.info("Rate limit atingido - reiniciando container para novo IP")
-    log.info("SaladCloud criará nova instância automaticamente")
-    
+
     # Exit code 2 = restart container
     sys.exit(2)
 
@@ -138,7 +137,7 @@ def main():
     
     # Mostrar IP atual (sem VPN)
     try:
-        import requests
+
         current_ip = requests.get("https://api.ipify.org", timeout=5).text
         log.info(f"IP atual da instância: {current_ip}")
     except:
@@ -201,7 +200,18 @@ def main():
                     if check_rate_limit_in_error(str(e)):
                         consecutive_rate_limit_errors += 1
                         log.warning(f"Rate limit detectado (erro #{consecutive_rate_limit_errors})")
-
+                    
+                        # Adicionar atualização ao batch
+                        pending_updates.append(
+                            UpdateOne(
+                                {"username": profile},
+                                {
+                                    "$set": {"status": "not_collected", "processed_by": hostname},
+                                    "$currentDate": {"updated_at": True}
+                                }
+                            )
+                        )
+                        
                         # Após 15 erros consecutivos de rate limit, reiniciar
                         if consecutive_rate_limit_errors >= 15:
                             log.info("Múltiplos rate limits detectados - reiniciando container")
@@ -209,17 +219,18 @@ def main():
                             handle_rate_limit_restart()
                         
                         request_count += 10  # Penalidade para rate limit
-                    
-                    # Adicionar atualização ao batch
-                    pending_updates.append(
-                        UpdateOne(
-                            {"username": profile},
-                            {
-                                "$set": {"status": "error", "processed_by": hostname},
-                                "$currentDate": {"updated_at": True}
-                            }
+                        
+                    else:
+                        # Erro comum - marcar como 'error'
+                        pending_updates.append(
+                            UpdateOne(
+                                {"username": profile},
+                                {
+                                    "$set": {"status": "error", "processed_by": hostname},
+                                    "$currentDate": {"updated_at": True}
+                                }
+                            )
                         )
-                    )
                     continue
                 
                 log.info(f"Dados coletados para o perfil: {profile}. Enviando para a API.")

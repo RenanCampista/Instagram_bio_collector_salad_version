@@ -32,18 +32,32 @@ def setup_logging(log_dir: str, log_name: str) -> logging.Logger:
 
 def send_pending_updates(collection: Collection, pending_updates: list[UpdateOne], log: logging.Logger) -> bool:
     """Envia atualizações pendentes para o MongoDB."""
-    if pending_updates:
-        try:
+    try:
+        # Verificar e resetar perfis que ficaram com status "processing"
+        processing_count = collection.count_documents({"status": "processing"})
+        if processing_count > 0:
+            reset_result = collection.update_many(
+                {"status": "processing"},
+                {
+                    "$set": {"status": "not_collected"},
+                    "$unset": {"processing_by": "", "instance_id": "", "processing_started_at": ""},
+                    "$currentDate": {"updated_at": True}
+                }
+            )
+        
+        # Enviar atualizações pendentes
+        if pending_updates:
             log.info(f"Enviando {len(pending_updates)} atualizações para o MongoDB...")
             result = collection.bulk_write(pending_updates, ordered=False)
             log.info(f"Batch enviado: {result.modified_count} documentos atualizados.")
             pending_updates.clear()
             return True
-        except Exception as batch_error:
-            log.error(f"Erro ao enviar batch de atualizações: {batch_error}")
+        return True
+    except Exception as batch_error:
+        log.error(f"Erro ao enviar batch de atualizações: {batch_error}")
+        if pending_updates:
             pending_updates.clear()  # Limpar para evitar reenvio
-            return False
-    return True
+        return False
 
 
 def connect_to_mongodb(connection_string: str, log: logging.Logger) -> MongoClient:
