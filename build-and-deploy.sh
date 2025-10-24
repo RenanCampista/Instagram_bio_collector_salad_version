@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script para construir e fazer deploy da aplicação no SaladCloud
+# Script para construir e fazer deploy da aplicação no SaladCloud versão linux
 
 set -e
 
