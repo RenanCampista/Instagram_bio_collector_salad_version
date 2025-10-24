@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 import os
+import hashlib
 
 from pymongo import MongoClient, errors, UpdateOne
 from pymongo.collection import Collection
@@ -79,34 +80,27 @@ def connect_to_mongodb(connection_string: str, log: logging.Logger) -> MongoClie
         raise
     
 
-def get_profiles_from_db(collection: Collection, log: logging.Logger, limit: int = 500) -> list[str]:
-    """Fetches profiles from the MongoDB collection."""
-    try:
-        log.info("Buscando perfis do banco de dados...")
-        
-        # Usar aggregate com $sample para obter perfis aleatórios
-        pipeline = [
-            {"$match": {"status": "not_collected"}},
-            {"$sample": {"size": limit}},
-            {"$project": {"username": 1, "_id": 0}}
-        ]
-        
-        # Adicionar configurações de timeout para a operação de agregação
-        cursor = collection.aggregate(
-            pipeline,
-            maxTimeMS=60000,  # Timeout de 60 segundos para a operação
-            allowDiskUse=True  # Permite usar disco se necessário para operações grandes
-        )
-        
-        profiles = [doc["username"] for doc in cursor if "username" in doc]
-        log.info(f"Buscados {len(profiles)} perfis aleatórios do banco de dados.")
-        return profiles
-    except errors.ExecutionTimeout as e:
-        log.error(f"Timeout ao buscar perfis do banco de dados: {e}")
-        return []
-    except errors.OperationFailure as e:
-        log.error(f"Falha na operação do banco de dados: {e}")
-        return []
-    except Exception as e:
-        log.error(f"Erro ao buscar perfis do banco de dados: {e}")
-        return []
+def get_instance_info():
+    """
+    Obtém informações da instância atual para distribuição de trabalho.
+    """
+    # Usar hostname como identificador único da instância
+    hostname = os.getenv('HOSTNAME', os.getenv('COMPUTERNAME', 'unknown'))
+    
+    # Criar ID numérico baseado no hostname
+    instance_id = int(hashlib.md5(hostname.encode()).hexdigest(), 16) % 1000
+    
+    # Número total de instâncias (configurável via ambiente)
+    instance_count = int(os.getenv('INSTANCE_COUNT', '1'))
+    
+    return instance_id, instance_count, hostname
+
+
+# Configurações específicas do SaladCloud
+SALAD_CONFIG = {
+    "max_requests_per_restart": 120,  # requisições antes de reiniciar para novo IP
+    "sleep_range": (2, 5),            # segundos entre requisições  
+    "restart_delay": 5,               # segundos antes de reiniciar
+    "batch_size": 50,                 # tamanho do batch para MongoDB
+    "health_check_interval": 300,     # 5 minutos
+}

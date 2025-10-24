@@ -22,7 +22,8 @@ class ApiDbClient:
                 resp = resp.get("resposta", "")
                 if resp:
                     self.log.info("Resposta da API:")
-                    self.log.info(f"\tSucesso: {resp.get('total', 'N/A')}")
+                    self.log.info(f"\tInseridos: {resp.get('inseridos', 'N/A')}")
+                    self.log.info(f"\tAtualizados: {resp.get('atualizados', 'N/A')}")
                     self.log.info(f"\tErros: {resp.get('erros', 'N/A')}")
                 return True
             else:

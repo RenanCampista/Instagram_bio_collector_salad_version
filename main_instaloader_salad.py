@@ -9,11 +9,12 @@ from instaloader import Instaloader, Profile
 from dotenv import load_dotenv
 from pymongo import UpdateOne
 
-from src.utils import connect_to_mongodb, setup_logging, send_pending_updates
 from src.api_db_client import ApiDbClient
-from src.salad_utils import (
+from src.utils import (
+    connect_to_mongodb, 
+    setup_logging, 
+    send_pending_updates,
     get_instance_info, 
-    log_instance_info,
     SALAD_CONFIG
 )
 
@@ -35,23 +36,18 @@ def load_env_variables():
 
 
 def get_profiles_from_db_distributed(collection, instance_id, instance_count, hostname, log, limit=100):
-    """
-    Obtém perfis do MongoDB com distribuição entre instâncias e marca como 'processing'.
-    """
+    """Obtém perfis do MongoDB com distribuição entre instâncias e marca como 'processing'."""
     try:
         # Query básica para perfis não coletados
         base_query = {"status": "not_collected"}
         
-        # Se múltiplas instâncias, usar distribuição
-        if instance_count > 1:
-            # Usar skip baseado no instance_id para distribuir
-            skip_amount = (instance_id % instance_count) * limit
-            profiles_cursor = collection.find(base_query).skip(skip_amount).limit(limit)
-        else:
-            profiles_cursor = collection.find(base_query).limit(limit)
+        # Usar agregação com $sample para seleção aleatória
+        pipeline = [
+            {"$match": base_query},
+            {"$sample": {"size": limit}}
+        ]
         
-        # Converter cursor para lista
-        profiles_docs = list(profiles_cursor)
+        profiles_docs = list(collection.aggregate(pipeline))
         
         if not profiles_docs:
             log.info("Nenhum perfil não coletado encontrado para esta instância")
@@ -66,11 +62,11 @@ def get_profiles_from_db_distributed(collection, instance_id, instance_count, ho
                 usernames.append(doc["username"])
                 profile_ids.append(doc["_id"])
         
-        # Atualizar status para 'processing' em lote usando findAndModify atômico
-        # Isso garante que apenas uma instância pegue cada perfil
+        # Atualizar status para 'processing' 
         final_usernames = []
         
         for username, profile_id in zip(usernames, profile_ids):
+            # Para fins de rastreamento, adicionar informações de qual instância está processando
             result = collection.find_one_and_update(
                 {"_id": profile_id, "status": "not_collected"},  # Só atualiza se ainda for 'not_collected'
                 {
@@ -100,20 +96,13 @@ def get_profiles_from_db_distributed(collection, instance_id, instance_count, ho
 
 
 def handle_rate_limit_restart():
-    """
-    Reinicia o container quando atinge rate limits.
-    Isso força o SaladCloud a criar nova instância com novo IP.
-    """
+    """Reinicia o container quando atinge rate limits."""
     log.info("Rate limit atingido - reiniciando container para novo IP")
-
-    # Exit code 2 = restart container
-    sys.exit(2)
+    sys.exit(2) # restart container
 
 
 def check_rate_limit_in_error(error_message):
-    """
-    Verifica se o erro é relacionado a rate limit.
-    """
+    """Verifica se o erro é relacionado a rate limit."""
     rate_limit_indicators = [
         "Please wait a few minutes before you try again",
         "429",
@@ -129,22 +118,16 @@ def main():
     """Main function to collect Instagram profile data without VPN."""
     config = load_env_variables()
     
-    # Obter informações da instância para distribuição de trabalho
     instance_id, instance_count, hostname = get_instance_info()
     
-    # Log informações da instância
-    log_instance_info(log, instance_id, instance_count, hostname)
-    
-    # Mostrar IP atual (sem VPN)
     try:
-
         current_ip = requests.get("https://api.ipify.org", timeout=5).text
         log.info(f"IP atual da instância: {current_ip}")
     except:
         log.info("IP atual: Não foi possível determinar")
 
     L = Instaloader()
-    L.context.sleep = True # Enable built-in sleep to handle rate limits
+    L.context.sleep = True
     
     api_client = ApiDbClient(config["API_ROUTE"], config["SECRET_TOKEN"], log)
     
@@ -154,19 +137,8 @@ def main():
         collection = database[config["MONGO_COLLECTION"]]
 
         request_count = 0
-        
-        # Lista para acumular atualizações em batch
         pending_updates = []
-        
-        # Contador para estatísticas
-        profiles_processed = 0
-        profiles_success = 0
-        
-        # Contador de erros de rate limit consecutivos
-        consecutive_rate_limit_errors = 0
-        
         while True:
-            # Usar função distribuída para obter perfis
             profiles = get_profiles_from_db_distributed(
                 collection, instance_id, instance_count, hostname, log
             )
@@ -176,9 +148,7 @@ def main():
                 break
             
             for profile in profiles:                
-                profiles_processed += 1
                 
-                # Sleep aleatório entre requisições
                 sleep_time = random.uniform(*SALAD_CONFIG["sleep_range"])
                 time.sleep(sleep_time)
                 
@@ -192,16 +162,14 @@ def main():
                     log.info(f"Coletando dados do perfil: {profile} (Instância {instance_id})")
                     profile_data = Profile.from_username(L.context, profile.strip())
                     request_count += 1
-                    consecutive_rate_limit_errors = 0  # Reset contador de erros
                 except Exception as e:
                     log.error(f"Erro ao coletar dados do perfil {profile}: {e}")
                     
                     # Verificar se é erro de rate limit
                     if check_rate_limit_in_error(str(e)):
-                        consecutive_rate_limit_errors += 1
-                        log.warning(f"Rate limit detectado (erro #{consecutive_rate_limit_errors})")
+                        log.warning(f"Rate limit detectado - adicionando penalidade ao contador")
+                        request_count += 15  # Penalidade maior força reinício mais rápido
                     
-                        # Adicionar atualização ao batch
                         pending_updates.append(
                             UpdateOne(
                                 {"username": profile},
@@ -211,17 +179,8 @@ def main():
                                 }
                             )
                         )
-                        
-                        # Após 15 erros consecutivos de rate limit, reiniciar
-                        if consecutive_rate_limit_errors >= 15:
-                            log.info("Múltiplos rate limits detectados - reiniciando container")
-                            send_pending_updates(collection, pending_updates, log)
-                            handle_rate_limit_restart()
-                        
-                        request_count += 10  # Penalidade para rate limit
-                        
                     else:
-                        # Erro comum - marcar como 'error'
+                        request_count += 10 # Penalidade menor para outros erros
                         pending_updates.append(
                             UpdateOne(
                                 {"username": profile},
@@ -246,14 +205,9 @@ def main():
                     "following": profile_data.followees,
                 }
 
-                # Enviar dados para API
-                success = api_client.send_json(data)
-                
-                if success:
-                    profiles_success += 1
+                if api_client.send_json(data):
                     log.info(f"Dados enviados com sucesso para o perfil: {profile}.")
                     
-                    # Adicionar atualização ao batch
                     pending_updates.append(
                         UpdateOne(
                             {"username": profile},
@@ -269,40 +223,25 @@ def main():
                         UpdateOne(
                             {"username": profile},
                             {
-                                "$set": {"status": "error", "processed_by": hostname},
+                                "$set": {"status": "not_collected", "processed_by": hostname},
                                 "$currentDate": {"updated_at": True}
                             }
                         )
                     )
 
-                # Enviar updates em lotes de 10
                 if len(pending_updates) >= 10:
                     send_pending_updates(collection, pending_updates, log)
-
-        # Enviar updates finais
         if pending_updates:
             send_pending_updates(collection, pending_updates, log)
-
     except KeyboardInterrupt:
         log.info("Encerrando script...")
     except Exception as e:
         log.error(f"Erro crítico: {e}")
         sys.exit(1)
     finally:
-        # Estatísticas finais
-        log.info(f"Estatísticas Finais (Instância {instance_id}):")
-        log.info(f"   - Perfis Processados: {profiles_processed}")
-        log.info(f"   - Sucessos: {profiles_success}")
-        if profiles_processed > 0:
-            success_rate = (profiles_success / profiles_processed) * 100
-            log.info(f"   - Taxa de Sucesso: {success_rate:.1f}%")
-        
-        # Enviar updates finais se houver
         if pending_updates:
             send_pending_updates(collection, pending_updates, log)
-            
-        log.info("Conexão MongoDB fechada.")
-
+        log.info("Script encerrado.")
 
 if __name__ == "__main__":
     main()
