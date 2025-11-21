@@ -188,7 +188,7 @@ def main():
                     if check_rate_limit_in_output("", captured_output):
                         log.warning(f"Rate limit detectado na saída do Instaloader para {profile}")
                         log.debug(f"Saída capturada: {captured_output}")
-                        request_count += 15
+                        request_count += 10
                         
                         pending_updates.append(
                             UpdateOne(
