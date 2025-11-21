@@ -115,7 +115,7 @@ def get_instance_info():
 
 # Configurações específicas do SaladCloud
 SALAD_CONFIG = {
-    "max_requests_per_restart": 120,  # requisições antes de reiniciar para novo IP
+    "max_requests_per_restart": 60,  # requisições antes de reiniciar para novo IP
     "sleep_range": (2, 5),            # segundos entre requisições  
     "restart_delay": 5,               # segundos antes de reiniciar
     "batch_size": 50,                 # tamanho do batch para MongoDB

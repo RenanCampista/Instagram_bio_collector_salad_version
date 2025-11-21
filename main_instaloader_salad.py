@@ -4,6 +4,8 @@ import random
 import os
 import sys
 import requests
+import io
+import contextlib
 
 from instaloader import Instaloader, Profile
 from dotenv import load_dotenv
@@ -102,17 +104,26 @@ def handle_rate_limit_restart():
     sys.exit(2) # restart container
 
 
-def check_rate_limit_in_error(error_message):
-    """Verifica se o erro é relacionado a rate limit."""
+def check_rate_limit_in_output(error_message, captured_output=""):
+    """Verifica se o erro ou saída capturada contém indicadores de rate limit."""
     rate_limit_indicators = [
         "Please wait a few minutes before you try again",
         "429",
         "Too Many Requests", 
         "rate limit",
-        "Temporary failure in name resolution"
+        "Temporary failure in name resolution",
+        "Max retries exceeded",
+        "please wait",
+        "checkpoint",
+        "badrequest",
+        "login required",
+        "401"
     ]
     
-    return any(indicator in str(error_message) for indicator in rate_limit_indicators)
+    # Combina mensagem de erro com saída capturada
+    full_text = str(error_message).lower() + " " + captured_output.lower()
+    
+    return any(indicator.lower() in full_text for indicator in rate_limit_indicators)
 
 
 def main():
@@ -164,12 +175,45 @@ def main():
                     
                 try:
                     log.info(f"Coletando dados do perfil: {profile} (Instância {instance_id})")
-                    profile_data = Profile.from_username(L.context, profile.strip())
+                    
+                    # Capturar stderr para detectar mensagens do Instaloader
+                    stderr_capture = io.StringIO()
+                    with contextlib.redirect_stderr(stderr_capture):
+                        profile_data = Profile.from_username(L.context, profile.strip())
+                    
+                    # Obter saída capturada
+                    captured_output = stderr_capture.getvalue()
+                    
+                    # Verificar se há indicadores de rate limit na saída, mesmo sem exceção
+                    if check_rate_limit_in_output("", captured_output):
+                        log.warning(f"Rate limit detectado na saída do Instaloader para {profile}")
+                        log.debug(f"Saída capturada: {captured_output}")
+                        request_count += 15
+                        
+                        pending_updates.append(
+                            UpdateOne(
+                                {"username": profile},
+                                {
+                                    "$set": {"status": "not_collected", "processed_by": hostname},
+                                    "$currentDate": {"updated_at": True}
+                                }
+                            )
+                        )
+                        continue
+                    
                     request_count += 1
+                    
                 except Exception as e:
+                    # Capturar stderr também em caso de exceção
+                    stderr_capture = io.StringIO()
+                    captured_output = stderr_capture.getvalue()
+                    
                     # Verificar se é erro de rate limit
-                    if check_rate_limit_in_error(str(e)):
+                    if check_rate_limit_in_output(str(e), captured_output):
                         log.warning(f"Rate limit detectado ao coletar {profile}.")
+                        log.debug(f"Erro: {e}")
+                        if captured_output:
+                            log.debug(f"Saída capturada: {captured_output}")
                         request_count += 15  # Penalidade maior força reinício mais rápido
                     
                         pending_updates.append(
@@ -183,6 +227,8 @@ def main():
                         )
                     else:
                         log.error(f"Erro ao coletar dados do perfil {profile}: {e}")
+                        if captured_output:
+                            log.debug(f"Saída capturada: {captured_output}")
                         request_count += 10 # Penalidade menor para outros erros
                         pending_updates.append(
                             UpdateOne(
