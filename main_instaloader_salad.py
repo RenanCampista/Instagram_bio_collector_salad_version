@@ -188,13 +188,14 @@ def main():
                     if check_rate_limit_in_output("", captured_output):
                         log.warning(f"Rate limit detectado na saída do Instaloader para {profile}")
                         log.debug(f"Saída capturada: {captured_output}")
-                        request_count += 10
+                        request_count += 15
                         
                         pending_updates.append(
                             UpdateOne(
-                                {"username": profile},
+                                {"username": profile, "status": "processing"},
                                 {
-                                    "$set": {"status": "not_collected", "processed_by": hostname},
+                                    "$set": {"status": "not_collected"},
+                                    "$unset": {"processing_by": "", "instance_id": "", "processing_started_at": ""},
                                     "$currentDate": {"updated_at": True}
                                 }
                             )
@@ -218,9 +219,10 @@ def main():
                     
                         pending_updates.append(
                             UpdateOne(
-                                {"username": profile},
+                                {"username": profile, "status": "processing"},
                                 {
-                                    "$set": {"status": "not_collected", "processed_by": hostname},
+                                    "$set": {"status": "not_collected"},
+                                    "$unset": {"processing_by": "", "instance_id": "", "processing_started_at": ""},
                                     "$currentDate": {"updated_at": True}
                                 }
                             )
@@ -232,9 +234,10 @@ def main():
                         request_count += 10 # Penalidade menor para outros erros
                         pending_updates.append(
                             UpdateOne(
-                                {"username": profile},
+                                {"username": profile, "status": "processing"},
                                 {
-                                    "$set": {"status": "error", "processed_by": hostname},
+                                    "$set": {"status": "error", "processed_by": hostname, "error_message": str(e)},
+                                    "$unset": {"instance_id": "", "processing_started_at": ""},
                                     "$currentDate": {"updated_at": True}
                                 }
                             )
@@ -259,9 +262,10 @@ def main():
                     
                     pending_updates.append(
                         UpdateOne(
-                            {"username": profile},
+                            {"username": profile, "status": "processing"},
                             {
                                 "$set": {"status": "collected", "processed_by": hostname},
+                                "$unset": {"instance_id": "", "processing_started_at": ""},
                                 "$currentDate": {"updated_at": True}
                             }
                         )
@@ -270,9 +274,10 @@ def main():
                     log.error(f"Falha ao enviar dados para o perfil: {profile}")
                     pending_updates.append(
                         UpdateOne(
-                            {"username": profile},
+                            {"username": profile, "status": "processing"},
                             {
-                                "$set": {"status": "not_collected", "processed_by": hostname},
+                                "$set": {"status": "not_collected"},
+                                "$unset": {"processing_by": "", "instance_id": "", "processing_started_at": ""},
                                 "$currentDate": {"updated_at": True}
                             }
                         )
