@@ -4,23 +4,11 @@ services:
   instagram-collector:
     build: .
     environment:
-      # Variáveis que devem ser configuradas no SaladCloud
       - MONGO_CONNECTION_STRING=${MONGO_CONNECTION_STRING}
       - MONGO_DB=${MONGO_DB}
       - MONGO_COLLECTION=${MONGO_COLLECTION}
       - API_ROUTE=${API_ROUTE}
       - SECRET_TOKEN=${SECRET_TOKEN}
-      - VPN_SERVICE=${VPN_SERVICE:-nordvpn}
     volumes:
       - ./logs:/app/logs
-    # Privilégios necessários para VPN
-    privileged: true
-    cap_add:
-      - NET_ADMIN
-      - SYS_MODULE
-    devices:
-      - /dev/net/tun:/dev/net/tun
-    # Reiniciar automaticamente em caso de falha
     restart: unless-stopped
-    # Comando personalizado se necessário
-    command: python3 main_instaloader.py nordvpn

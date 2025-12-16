@@ -3,11 +3,11 @@ import time
 import random
 import os
 import sys
-import requests
 import io
 import contextlib
 
 from instaloader import Instaloader, Profile
+from pymongo.collection import Collection
 from dotenv import load_dotenv
 from pymongo import UpdateOne
 
@@ -16,17 +16,15 @@ from src.utils import (
     connect_to_mongodb, 
     setup_logging, 
     send_pending_updates,
-    reset_stuck_processing_profiles,
-    get_instance_info, 
-    SALAD_CONFIG
+    reset_stuck_processing_profiles
 )
 
 
 log = logging.getLogger(__name__)
 log = setup_logging("logs/bio_collector_instaloader", "bio_collector")
+MAX_REQUESTS_PER_RESTART = 50  # Número de requisições antes de reiniciar o container
 
-
-def load_env_variables():
+def load_env_variables() -> dict:
     load_dotenv()
     config = {
         "MONGO_CONNECTION_STRING": os.getenv("MONGO_CONNECTION_STRING"),
@@ -38,10 +36,9 @@ def load_env_variables():
     return config
 
 
-def get_profiles_from_db_distributed(collection, instance_id, hostname, log, limit=100):
-    """Obtém perfis do MongoDB com distribuição entre instâncias e marca como 'processing'."""
+def get_profiles_from_database(collection: Collection, log: logging.Logger, limit: int = 100) -> list[str]:
+    """Obtém perfis da base de dados e marca como 'processing'."""
     try:
-        # Query básica para perfis não coletados
         base_query = {"status": "not_collected"}
         
         # Usar agregação com $sample para seleção aleatória
@@ -65,20 +62,17 @@ def get_profiles_from_db_distributed(collection, instance_id, hostname, log, lim
                 usernames.append(doc["username"])
                 profile_ids.append(doc["_id"])
         
-        # Atualizar status para 'processing' 
         final_usernames = []
         
         for username, profile_id in zip(usernames, profile_ids):
-            # Para fins de rastreamento, adicionar informações de qual instância está processando
-            result = collection.find_one_and_update(
-                {"_id": profile_id, "status": "not_collected"},  # Só atualiza se ainda for 'not_collected'
+            result = collection.find_one_and_update({
+                    "_id": profile_id, 
+                    "status": "not_collected"
+                },
                 {
                     "$set": {
                         "status": "processing",
-                        "processing_by": hostname,
-                        "instance_id": instance_id
                     },
-                    "$currentDate": {"processing_started_at": True}
                 },
                 return_document=True
             )
@@ -87,7 +81,7 @@ def get_profiles_from_db_distributed(collection, instance_id, hostname, log, lim
                 final_usernames.append(username)
         
         if final_usernames:
-            log.info(f"Reservados {len(final_usernames)} perfis para processamento (Instância {instance_id})")
+            log.info(f"Reservados {len(final_usernames)} perfis para processamento nesta instância")
         else:
             log.info("Nenhum perfil disponível - todos já sendo processados por outras instâncias")
         
@@ -100,24 +94,16 @@ def get_profiles_from_db_distributed(collection, instance_id, hostname, log, lim
 
 def handle_rate_limit_restart():
     """Reinicia o container quando atinge rate limits."""
-    log.info("Rate limit atingido - reiniciando container para novo IP")
     sys.exit(2) # restart container
 
 
-def check_rate_limit_in_output(error_message, captured_output=""):
+def check_rate_limit_in_output(error_message: str, captured_output: str = "") -> bool:
     """Verifica se o erro ou saída capturada contém indicadores de rate limit."""
     rate_limit_indicators = [
         "Please wait a few minutes before you try again",
         "429",
-        "Too Many Requests", 
-        "rate limit",
-        "Temporary failure in name resolution",
-        "Max retries exceeded",
-        "please wait",
-        "checkpoint",
-        "badrequest",
-        "login required",
-        "401"
+        "Too many requests",
+        "401 Unauthorized"
     ]
     
     # Combina mensagem de erro com saída capturada
@@ -127,17 +113,8 @@ def check_rate_limit_in_output(error_message, captured_output=""):
 
 
 def main():
-    """Main function to collect Instagram profile data without VPN."""
     config = load_env_variables()
     
-    instance_id, instance_count, hostname = get_instance_info()
-    
-    try:
-        current_ip = requests.get("https://api.ipify.org", timeout=5).text
-        log.info(f"IP atual da instância: {current_ip}")
-    except:
-        log.info("IP atual: Não foi possível determinar")
-
     L = Instaloader()
     L.context.sleep = True
     
@@ -154,8 +131,9 @@ def main():
         request_count = 0
         pending_updates = []
         while True:
-            profiles = get_profiles_from_db_distributed(
-                collection, instance_id, hostname, log
+            profiles = get_profiles_from_database(
+                collection=collection, 
+                log=log
             )
             
             if not profiles:
@@ -163,18 +141,16 @@ def main():
                 break
             
             for profile in profiles:                
-                
-                sleep_time = random.uniform(*SALAD_CONFIG["sleep_range"])
-                time.sleep(sleep_time)
+                time.sleep(random.uniform(2, 5))  # Espera entre requisições
                 
                 # Verificar se deve reiniciar por número de requisições
-                if request_count >= SALAD_CONFIG["max_requests_per_restart"]:
+                if request_count >= MAX_REQUESTS_PER_RESTART:
                     log.info(f"Processadas {request_count} requisições - reiniciando para novo IP")
                     send_pending_updates(collection, pending_updates, log)
                     handle_rate_limit_restart()
                     
                 try:
-                    log.info(f"Coletando dados do perfil: {profile} (Instância {instance_id})")
+                    log.info(f"Coletando dados do perfil: {profile}")
                     
                     # Capturar stderr para detectar mensagens do Instaloader
                     stderr_capture = io.StringIO()
@@ -192,10 +168,11 @@ def main():
                         
                         pending_updates.append(
                             UpdateOne(
-                                {"username": profile, "status": "processing"},
+                                {"username": profile, 
+                                 "status": "processing"
+                                },
                                 {
                                     "$set": {"status": "not_collected"},
-                                    "$unset": {"processing_by": "", "instance_id": "", "processing_started_at": ""},
                                     "$currentDate": {"updated_at": True}
                                 }
                             )
@@ -219,10 +196,10 @@ def main():
                     
                         pending_updates.append(
                             UpdateOne(
-                                {"username": profile, "status": "processing"},
+                                {"username": profile, 
+                                "status": "processing"},
                                 {
                                     "$set": {"status": "not_collected"},
-                                    "$unset": {"processing_by": "", "instance_id": "", "processing_started_at": ""},
                                     "$currentDate": {"updated_at": True}
                                 }
                             )
@@ -236,8 +213,7 @@ def main():
                             UpdateOne(
                                 {"username": profile, "status": "processing"},
                                 {
-                                    "$set": {"status": "error", "processed_by": hostname, "error_message": str(e)},
-                                    "$unset": {"instance_id": "", "processing_started_at": ""},
+                                    "$set": {"status": "error"},
                                     "$currentDate": {"updated_at": True}
                                 }
                             )
@@ -264,8 +240,7 @@ def main():
                         UpdateOne(
                             {"username": profile, "status": "processing"},
                             {
-                                "$set": {"status": "collected", "processed_by": hostname},
-                                "$unset": {"instance_id": "", "processing_started_at": ""},
+                                "$set": {"status": "collected"},
                                 "$currentDate": {"updated_at": True}
                             }
                         )
@@ -277,7 +252,6 @@ def main():
                             {"username": profile, "status": "processing"},
                             {
                                 "$set": {"status": "not_collected"},
-                                "$unset": {"processing_by": "", "instance_id": "", "processing_started_at": ""},
                                 "$currentDate": {"updated_at": True}
                             }
                         )
@@ -287,8 +261,6 @@ def main():
                     send_pending_updates(collection, pending_updates, log)
         if pending_updates:
             send_pending_updates(collection, pending_updates, log)
-    except KeyboardInterrupt:
-        log.info("Encerrando script...")
     except Exception as e:
         log.error(f"Erro crítico: {e}")
         sys.exit(1)

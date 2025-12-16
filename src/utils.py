@@ -1,7 +1,6 @@
 import logging
 from datetime import datetime
 import os
-import hashlib
 
 from pymongo import MongoClient, errors, UpdateOne
 from pymongo.collection import Collection
@@ -45,7 +44,7 @@ def send_pending_updates(collection: Collection, pending_updates: list[UpdateOne
     except Exception as batch_error:
         log.error(f"Erro ao enviar batch de atualizações: {batch_error}")
         if pending_updates:
-            pending_updates.clear()  # Limpar para eviar reenvio
+            pending_updates.clear()
         return False
 
 
@@ -63,7 +62,6 @@ def reset_stuck_processing_profiles(collection: Collection, log: logging.Logger)
                 {"status": "processing"},
                 {
                     "$set": {"status": "not_collected"},
-                    "$unset": {"processing_by": "", "instance_id": "", "processing_started_at": ""},
                     "$currentDate": {"updated_at": True}
                 }
             )
@@ -96,28 +94,3 @@ def connect_to_mongodb(connection_string: str, log: logging.Logger) -> MongoClie
         log.error(f"Erro ao conectar ao banco de dados MongoDB: {err}")
         raise
     
-
-def get_instance_info():
-    """
-    Obtém informações da instância atual para distribuição de trabalho.
-    """
-    # Usar hostname como identificador único da instância
-    hostname = os.getenv('HOSTNAME', os.getenv('COMPUTERNAME', 'unknown'))
-    
-    # Criar ID numérico baseado no hostname
-    instance_id = int(hashlib.md5(hostname.encode()).hexdigest(), 16) % 1000
-    
-    # Número total de instâncias (configurável via ambiente)
-    instance_count = int(os.getenv('INSTANCE_COUNT', '1'))
-    
-    return instance_id, instance_count, hostname
-
-
-# Configurações específicas do SaladCloud
-SALAD_CONFIG = {
-    "max_requests_per_restart": 60,  # requisições antes de reiniciar para novo IP
-    "sleep_range": (2, 5),            # segundos entre requisições  
-    "restart_delay": 5,               # segundos antes de reiniciar
-    "batch_size": 50,                 # tamanho do batch para MongoDB
-    "health_check_interval": 300,     # 5 minutos
-}

@@ -1,0 +1,7 @@
+{
+    "python.defaultInterpreterPath": "/home/renan/.venvs/global/bin/python3",
+    "terminal.integrated.env.linux": {
+        "VIRTUAL_ENV": "/home/renan/.venvs/global",
+        "PATH": "/home/renan/.venvs/global/bin:${env:PATH}"
+    }
+}

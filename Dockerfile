@@ -1,9 +1,6 @@
-# Dockerfile for Instagram Bio Collector - No VPN Version
-# Otimizado para SaladCloud com rotação de containers
-
 FROM ubuntu:22.04
 
-# Instalar dependências básicas (sem OpenVPN)
+# Instalar dependências básicas
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
@@ -24,13 +21,6 @@ COPY main_instaloader_salad.py .
 
 # Criar diretório de logs
 RUN mkdir -p logs/bio_collector_instaloader
-
-# Copiar script de entrada
-COPY docker-entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-
-# Definir ponto de entrada
-ENTRYPOINT ["/entrypoint.sh"]
 
 # Comando padrão
 CMD ["python3", "main_instaloader_salad.py"]
