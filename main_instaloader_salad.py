@@ -4,12 +4,18 @@ import random
 import os
 import sys
 import io
-import contextlib
 
-from instaloader import Instaloader, Profile
 from pymongo.collection import Collection
 from dotenv import load_dotenv
 from pymongo import UpdateOne
+from instaloader import (
+    Instaloader, 
+    Profile, 
+    ProfileNotExistsException,
+    PrivateProfileNotFollowedException,
+    QueryReturnedBadRequestException,
+    ConnectionException
+)
 
 from src.api_db_client import ApiDbClient
 from src.utils import (
@@ -151,47 +157,64 @@ def main():
                     
                 try:
                     log.info(f"Coletando dados do perfil: {profile}")
-                    
-                    # Capturar stderr para detectar mensagens do Instaloader
-                    stderr_capture = io.StringIO()
-                    with contextlib.redirect_stderr(stderr_capture):
-                        profile_data = Profile.from_username(L.context, profile.strip())
-                    
-                    # Obter saída capturada
-                    captured_output = stderr_capture.getvalue()
-                    
-                    # Verificar se há indicadores de rate limit na saída, mesmo sem exceção
-                    if check_rate_limit_in_output("", captured_output):
-                        log.warning(f"Rate limit detectado na saída do Instaloader para {profile}")
-                        log.debug(f"Saída capturada: {captured_output}")
-                        request_count += 15
-                        
-                        pending_updates.append(
-                            UpdateOne(
-                                {"username": profile, 
-                                 "status": "processing"
-                                },
-                                {
-                                    "$set": {"status": "not_collected"},
-                                    "$currentDate": {"updated_at": True}
-                                }
-                            )
-                        )
-                        continue
-                    
+                    profile_data = Profile.from_username(L.context, profile.strip())
                     request_count += 1
-                    
+                except ProfileNotExistsException as e: 
+                    log.warning(f"Perfil {profile} não existe.")
+                    pending_updates.append(
+                        UpdateOne(
+                            {
+                                "username": profile, 
+                                "status": "processing"
+                            },
+                            {
+                                "$set": {"status": "profile_not_exists"},
+                                "$currentDate": {"updated_at": True}
+                            }
+                        )
+                    )
+                    request_count += 1
+                    continue
+                except PrivateProfileNotFollowedException as e:
+                    log.warning(f"Perfil {profile} é privado.")
+                    pending_updates.append(
+                        UpdateOne(
+                            {
+                                "username": profile, 
+                                "status": "processing"
+                            },
+                            {
+                                "$set": {"status": "private_profile"},
+                                "$currentDate": {"updated_at": True}
+                            }
+                        )
+                    )
+                    request_count += 1
+                    continue
+                except (QueryReturnedBadRequestException, ConnectionException) as e:
+                    log.warning(f"Erro de conexão ou requisição para o perfil {profile}: {e}")
+                    request_count += 5  # Penalidade maior para erros de conexão
+                    pending_updates.append(
+                        UpdateOne(
+                            {
+                                "username": profile, 
+                                "status": "processing"
+                            },
+                            {
+                                "$set": {"status": "connection_error"},
+                                "$currentDate": {"updated_at": True}
+                            }
+                        )
+                    )
+                    continue
                 except Exception as e:
-                    # Capturar stderr também em caso de exceção
+                    # Capturar a saída padrão para análise
                     stderr_capture = io.StringIO()
                     captured_output = stderr_capture.getvalue()
                     
                     # Verificar se é erro de rate limit
                     if check_rate_limit_in_output(str(e), captured_output):
                         log.warning(f"Rate limit detectado ao coletar {profile}.")
-                        log.debug(f"Erro: {e}")
-                        if captured_output:
-                            log.debug(f"Saída capturada: {captured_output}")
                         request_count += 15  # Penalidade maior força reinício mais rápido
                     
                         pending_updates.append(
@@ -206,12 +229,13 @@ def main():
                         )
                     else:
                         log.error(f"Erro ao coletar dados do perfil {profile}: {e}")
-                        if captured_output:
-                            log.debug(f"Saída capturada: {captured_output}")
                         request_count += 10 # Penalidade menor para outros erros
                         pending_updates.append(
                             UpdateOne(
-                                {"username": profile, "status": "processing"},
+                                {
+                                    "username": profile, 
+                                    "status": "processing"
+                                },
                                 {
                                     "$set": {"status": "error"},
                                     "$currentDate": {"updated_at": True}
@@ -238,7 +262,10 @@ def main():
                     
                     pending_updates.append(
                         UpdateOne(
-                            {"username": profile, "status": "processing"},
+                            {
+                                "username": profile, 
+                                "status": "processing"
+                            },
                             {
                                 "$set": {"status": "collected"},
                                 "$currentDate": {"updated_at": True}
@@ -249,7 +276,10 @@ def main():
                     log.error(f"Falha ao enviar dados para o perfil: {profile}")
                     pending_updates.append(
                         UpdateOne(
-                            {"username": profile, "status": "processing"},
+                            {
+                                "username": profile, 
+                                "status": "processing"
+                            },
                             {
                                 "$set": {"status": "not_collected"},
                                 "$currentDate": {"updated_at": True}
