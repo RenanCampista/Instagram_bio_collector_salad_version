@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 log = setup_logging("logs/bio_collector_instaloader", "bio_collector")
 
 MAX_REQUESTS_PER_RESTART = 50  # Número de requisições antes de reiniciar o container
-BATCH_UPDATE_SIZE = 10  # Tamanho do lote para atualizações no MongoDB
+BATCH_UPDATE_SIZE = 3  # Tamanho do lote para atualizações no MongoDB
 
 
 def load_env_variables() -> dict:
@@ -149,7 +149,7 @@ def main():
                 # Atualizar status no MongoDB
                 pending_updates.append(
                     UpdateOne(
-                        {"username": profile, "status": "processing"},
+                        {"username": profile},
                         {
                             "$set": {"status": status},
                             "$currentDate": {"updated_at": True}
