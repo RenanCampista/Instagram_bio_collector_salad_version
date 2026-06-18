@@ -1,22 +1,21 @@
 import logging
-import time
-import random
 import os
+import random
 import sys
+import time
 
-from pymongo.collection import Collection
 from dotenv import load_dotenv
 from pymongo import UpdateOne
+from pymongo.collection import Collection
 
 from src.api_db_client import ApiDbClient
 from src.instagram_profile_fetcher import InstagramProfileFetcher
 from src.utils import (
-    connect_to_mongodb, 
-    setup_logging, 
+    connect_to_mongodb,
+    reset_stuck_processing_profiles,
     send_pending_updates,
-    reset_stuck_processing_profiles
+    setup_logging,
 )
-
 
 log = logging.getLogger(__name__)
 log = setup_logging("logs/bio_collector_instaloader", "bio_collector")
@@ -37,57 +36,58 @@ def load_env_variables() -> dict:
     return config
 
 
-def get_profiles_from_database(collection: Collection, log: logging.Logger, limit: int = 100) -> list[str]:
+def get_profiles_from_database(
+    collection: Collection, log: logging.Logger, limit: int = 100
+) -> list[str]:
     """Obtém perfis da base de dados e marca como 'processing'."""
     try:
         base_query = {"status": "not_collected"}
-        
+
         # Usar agregação com $sample para seleção aleatória
-        pipeline = [
-            {"$match": base_query},
-            {"$sample": {"size": limit}}
-        ]
-        
+        pipeline = [{"$match": base_query}, {"$sample": {"size": limit}}]
+
         profiles_docs = list(collection.aggregate(pipeline))
-        
+
         if not profiles_docs:
             log.info("Nenhum perfil não coletado encontrado para esta instância")
             return []
-        
+
         # Extrair usernames e _ids para o update
         usernames = []
         profile_ids = []
-        
+
         for doc in profiles_docs:
             if "username" in doc:
                 usernames.append(doc["username"])
                 profile_ids.append(doc["_id"])
-        
+
         final_usernames = []
-        
-        for username, profile_id in zip(usernames, profile_ids):
-            result = collection.find_one_and_update({
-                    "_id": profile_id, 
-                    "status": "not_collected"
-                },
+
+        for username, profile_id in zip(usernames, profile_ids, strict=False):
+            result = collection.find_one_and_update(
+                {"_id": profile_id, "status": "not_collected"},
                 {
                     "$set": {
                         "status": "processing",
                     },
                 },
-                return_document=True
+                return_document=True,
             )
-            
+
             if result:  # Se conseguiu fazer o update (não foi pego por outra instância)
                 final_usernames.append(username)
-        
+
         if final_usernames:
-            log.info(f"Reservados {len(final_usernames)} perfis para processamento nesta instância")
+            log.info(
+                f"Reservados {len(final_usernames)} perfis para processamento nesta instância"
+            )
         else:
-            log.info("Nenhum perfil disponível - todos já sendo processados por outras instâncias")
-        
+            log.info(
+                "Nenhum perfil disponível - todos já sendo processados por outras instâncias"
+            )
+
         return final_usernames
-        
+
     except Exception as e:
         log.error(f"Erro ao obter perfis do MongoDB: {e}")
         return []
@@ -95,68 +95,71 @@ def get_profiles_from_database(collection: Collection, log: logging.Logger, limi
 
 def handle_rate_limit_restart():
     """Reinicia o container quando atinge rate limits."""
-    sys.exit(2) # restart container
+    sys.exit(2)  # restart container
 
 
 def main():
     config = load_env_variables()
-    
+
     api_client = ApiDbClient(config["API_ROUTE"], config["SECRET_TOKEN"], log)
     profile_fetcher = InstagramProfileFetcher(log)
-    
+
     try:
         client = connect_to_mongodb(config["MONGO_CONNECTION_STRING"], log)
         database = client[config["MONGO_DB"]]
         collection = database[config["MONGO_COLLECTION"]]
-        
+
         # Resetar perfis travados em 'processing' (de instâncias que crasharam/reiniciaram)
         reset_stuck_processing_profiles(collection, log)
 
         request_count = 0
         pending_updates = []
         while True:
-            profiles = get_profiles_from_database(
-                collection=collection, 
-                log=log
-            )
-            
+            profiles = get_profiles_from_database(collection=collection, log=log)
+
             if not profiles:
                 log.info("Não há mais perfis para processar. Encerrando o script.")
                 break
-            
-            for profile in profiles:                
+
+            for profile in profiles:
                 time.sleep(random.uniform(2, 5))  # Espera entre requisições
-                
+
                 # Verificar se deve reiniciar por número de requisições
                 if request_count >= MAX_REQUESTS_PER_RESTART:
-                    log.info(f"Processadas {request_count} requisições - reiniciando para novo IP")
+                    log.info(
+                        f"Processadas {request_count} requisições - reiniciando para novo IP"
+                    )
                     send_pending_updates(collection, pending_updates, log)
                     handle_rate_limit_restart()
-                
+
                 profile_data, status, penalty = profile_fetcher.fetch_profile(profile)
-                request_count += penalty # Incrementa contagem de requisições
-                
+                request_count += penalty  # Incrementa contagem de requisições
+
                 # Se coleta foi bem-sucedida, enviar para API
                 if status == "collected" and profile_data:
-                    log.info(f"Dados coletados para o perfil: {profile}. Enviando para a API.")
-                    
+                    log.info(
+                        f"Dados coletados para o perfil: {profile}. Enviando para a API."
+                    )
+
                     if api_client.send_json(profile_data):
-                        log.info(f"Dados enviados com sucesso para o perfil: {profile}.")
+                        log.info(
+                            f"Dados enviados com sucesso para o perfil: {profile}."
+                        )
                     else:
                         log.error(f"Falha ao enviar dados para o perfil: {profile}")
                         status = "not_collected"
-                
+
                 # Atualizar status no MongoDB
                 pending_updates.append(
                     UpdateOne(
                         {"username": profile},
                         {
                             "$set": {"status": status},
-                            "$currentDate": {"updated_at": True}
-                        }
+                            "$currentDate": {"updated_at": True},
+                        },
                     )
                 )
-                
+
                 # Enviar batch se atingir o limite
                 if len(pending_updates) >= BATCH_UPDATE_SIZE:
                     send_pending_updates(collection, pending_updates, log)
@@ -169,6 +172,7 @@ def main():
         if pending_updates:
             send_pending_updates(collection, pending_updates, log)
         log.info("Script encerrado.")
+
 
 if __name__ == "__main__":
     main()

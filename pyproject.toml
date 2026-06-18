@@ -1,0 +1,47 @@
+[project]
+name = "Instagram bio collector"
+version = "0.1.0"
+description = "A Python package to collect Instagram bios using the Instaloader library."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+exclude = [
+    ".git",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "app/infrastructure/database/migrations",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "C90", # mccabe complexity
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # bugbear
+    "SIM", # simplify
+    "C4",  # comprehensions
+]
+
+ignore = [
+    "E501",
+    "B008",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
