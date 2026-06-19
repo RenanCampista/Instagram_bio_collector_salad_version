@@ -53,11 +53,13 @@ class InstagramProfileFetcher:
                 "username": profile_data.username,
                 "full_name": profile_data.full_name,
                 "profile_url": f"https://www.instagram.com/{profile_data.username}/",
-                "userid": profile_data.userid,
+                "userid": getattr(profile_data, "userid", None),
                 "biography": profile_data.biography,
                 "external_url": profile_data.external_url,
-                "followers": profile_data.followers,
-                "following": profile_data.followees,
+                "followers": getattr(profile_data, "followers", None),
+                "following": getattr(profile_data, "following", None),
+                "is_private": profile_data.is_private,
+                "is_verified": profile_data.is_verified,
             }
 
             return data, "collected", 1
