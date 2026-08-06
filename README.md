@@ -59,6 +59,18 @@ docker run \
   renan2002/instagram-bio-collector:latest
 ```
 
+No powershell:
+```powershell
+docker run `
+  -e MONGO_CONNECTION_STRING="sua_string_conexao" `
+  -e MONGO_DB="seu_banco" `
+  -e MONGO_COLLECTION="sua_colecao" `
+  -e API_ROUTE="sua_api" `
+  -e SECRET_TOKEN="seu_token" `
+  -e TOTAL_INSTANCES="1" `
+  renan2002/instagram-bio-collector:latest
+```
+
 ### Build da Imagem
 ```bash
 docker build -t renan2002/instagram-bio-collector:latest .
